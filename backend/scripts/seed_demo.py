@@ -6,7 +6,8 @@ from src.config.domain import DOMAIN
 from src.models.user import User
 from src.models.study import Study
 from src.models.observation import Observation
-from src.models import run,review,audit
+from src.models import run,review,audit,pairing
+from src.models.pairing import PairingReading, PairingStudy
 from src.utils.security import hash_password
 
 def seed():
@@ -37,7 +38,29 @@ def seed():
                 key=f'DEMO-{k+1}-{n+1:04}'
                 if not db.scalar(select(Observation.id).where(Observation.study_id==study.id,Observation.source_key==key)):
                     db.add(Observation(study_id=study.id,source_key=key,values=values))
+        seed_pairing(db)
         db.commit()
         counts={model.__tablename__:db.scalar(select(func.count()).select_from(model)) for model in (User,Study,Observation)}
         print(json.dumps(counts));return counts
+def seed_pairing(db):
+    """两册杯签遗失的配对演示：少量读数，故意保留两条同成本不同中位数的配法。"""
+    from src.utils.serializers import now
+    name='青禾·杯签遗失配对'
+    study=db.scalar(select(PairingStudy).where(PairingStudy.name==name))
+    if not study:
+        study=PairingStudy(name=name,description='两次化验杯签遗失，只能按同批采样时间配对',revision=0,created_at=now())
+        db.add(study);db.flush()
+    rows=[
+        ('initial','I0',15,'2.2'),('initial','I1',10,'0.4'),
+        ('retest','R0',6,'0.2'),('retest','R1',13,'2.9'),('retest','R2',6,'2.0'),
+    ]
+    for booklet,key,minute,moisture in rows:
+        if not db.scalar(select(PairingReading.id).where(
+                PairingReading.pairing_study_id==study.id,
+                PairingReading.booklet==booklet,
+                PairingReading.source_key==key)):
+            db.add(PairingReading(pairing_study_id=study.id,booklet=booklet,source_key=key,
+                                  sampled_at=minute,moisture=moisture,updated_at=now()))
+
+
 if __name__=='__main__': seed()

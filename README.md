@@ -10,6 +10,7 @@
 ## 功能与方法
 - 茶样批次、浸出观测录入/编辑/删除；重名记录与非法数值明确拒绝。
 - 分位数、ECDF与按批bootstrap中位数区间。中位数置信区间描述估计不确定性，不是下一份茶样的预测区间。
+- 杯签遗失的配对研究（`#pairing`）：初测册与复测册只按同批采样时间配对，每份读数最多配一次；先配足最多份数，再使总时差最小。同成本的配法全部纳入，给出“复测−初测”含水率差值中位数的上下界，并各附一份达到该界的配对明细；偶数份取中间两项平均。每册最多 40 份。
 - 每次运行冻结参数、观测和SHA256。Redis任务由独立worker计算，写DB与共享产物卷；输入修改不会改写历史结果。
 - 负责人复核不可覆盖；审计记录登录、数据改动、排队、复核与导出；240请求/分钟限流、全局可恢复错误。
 
@@ -51,6 +52,12 @@ docker compose exec -T backend python -m scripts.seed_demo
 环境变量 `.env.example`：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、DB_PASSWORD、JWT_SECRET、SEED_DEMO。开发时在本地venv安装backend/requirements.txt，设置DATABASE_URL、REDIS_URL、JWT_SECRET再运行uvicorn；前端开发经Nginx代理 `/api/` 到不带前缀的API。
 
 共享枚举：角色admin/analyst/viewer和队列queued/running/completed/failed；后端`src/constants/enums.py`、认证与worker使用相同值；前端`src/types/enums.js`、状态与角色界面使用相同值。Google Fonts：Noto Serif SC + IBM Plex Mono；断网使用serif/monospace回退。
+
+## 配对研究（杯签遗失）
+- 冻结：发起研究时冻结两册读数与允许时差，写入输入 SHA256 与冻结 revision；worker 只读快照，后续更正不改写历史结果。
+- 并发更正：一次更正可在同一事务内同时改两册并递增 revision。冻结用“读 revision → 读两册 → 再读 revision”取快照，两次一致才接受，因此初测与复测一定同属更正之前或之后；重试前清空会话身份映射，避免读到上一轮旧值。
+- 算法：最大份数/最小时差用带奖励的最小费用指派（Hungarian）一次求解；中位数界同样用带计数奖励的指派在候选差值上二分，全部精确、确定性、多项式时间。同成本配法通过“份数 k、总时差 total”的字典序约束一次性纳入，不遗漏。
+- 展示：结果页核对（份数、总时差、每份差值、按明细复算的两倍中位数、每份读数只用一次）全部通过才显示上下界；无配对时说明原因（最近采样时间差）。
 
 ## 算法输入、失败态与复现
 输入为选定批次全部观测和参数，输出核心数值、明细、解释；参数经后端严格白名单和范围验证。中位数置信区间描述估计不确定性，不是下一份茶样的预测区间。。空批次拒绝；不完整字段/非有限数/非法计数拒绝；常量相关列与不足样本使任务failed并保留错误。固定seed42、输入checksum相同可复现。独立oracle：按线性插值手算分位数；固定seed重采样复现；常量与空组边界。
